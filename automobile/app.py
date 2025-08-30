@@ -10,8 +10,13 @@ st.title("🚗 Data driven mobility solutions")
 # Load and cache data
 @st.cache_data
 def load_data():
-    df = pd.read_csv("Automobile.csv")
+    # Load everything as string to avoid PyArrow errors
+    df = pd.read_csv("Automobile.csv", dtype=str)
     df.columns = df.columns.str.strip().str.lower()
+
+    # Try converting numeric columns back to numbers
+    for col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors="ignore")
     return df
 
 # Load dataset
@@ -46,15 +51,23 @@ elif action == "Fill with mean (numeric only)":
 
 # Filter by car make
 st.subheader("🔍 Filter by Make")
-if 'make' not in df.columns:
-    st.error("❌ 'make' column not found.")
-    st.stop()
 
-makes = df['make'].dropna().unique()
-selected_makes = st.multiselect("Choose car makes", sorted(makes), default=sorted(makes)[:3])
-filtered_df = df[df['make'].isin(selected_makes)]
-st.write(f"Filtered dataset ({len(filtered_df)} rows):")
-st.dataframe(filtered_df)
+# Try to detect column name
+make_col = None
+for candidate in ["make", "company", "brand", "manufacturer"]:
+    if candidate in df.columns:
+        make_col = candidate
+        break
+
+if make_col is None:
+    st.warning("⚠️ No 'make' column found. Using all data without filtering by car make.")
+    filtered_df = df.copy()
+else:
+    makes = df[make_col].dropna().unique()
+    selected_makes = st.multiselect("Choose car makes", sorted(makes), default=sorted(makes)[:3])
+    filtered_df = df[df[make_col].isin(selected_makes)]
+    st.write(f"Filtered dataset ({len(filtered_df)} rows):")
+    st.dataframe(filtered_df)
 
 # Download filtered data
 csv = filtered_df.to_csv(index=False).encode('utf-8')
@@ -68,7 +81,10 @@ if len(numeric_cols) >= 2:
     y_col = st.selectbox("Y-axis", numeric_cols, index=1)
 
     fig1, ax1 = plt.subplots()
-    sns.scatterplot(data=filtered_df, x=x_col, y=y_col, hue='make', ax=ax1)
+    if make_col:
+        sns.scatterplot(data=filtered_df, x=x_col, y=y_col, hue=make_col, ax=ax1)
+    else:
+        sns.scatterplot(data=filtered_df, x=x_col, y=y_col, ax=ax1)
     plt.title(f"{y_col} vs {x_col}")
     st.pyplot(fig1)
 else:
@@ -83,23 +99,29 @@ if st.checkbox("🔁 Show Correlation Heatmap"):
 
 # Histogram
 st.subheader("📊 Histogram")
-hist_col = st.selectbox("Select a column to plot histogram", numeric_cols)
-fig3, ax3 = plt.subplots()
-sns.histplot(filtered_df[hist_col], kde=True, ax=ax3)
-plt.title(f"Distribution of {hist_col}")
-st.pyplot(fig3)
+if len(numeric_cols) > 0:
+    hist_col = st.selectbox("Select a column to plot histogram", numeric_cols)
+    fig3, ax3 = plt.subplots()
+    sns.histplot(data=filtered_df, x=hist_col, kde=True, ax=ax3)  # ✅ Fixed
+    plt.title(f"Distribution of {hist_col}")
+    st.pyplot(fig3)
+else:
+    st.warning("⚠️ No numeric columns available for histogram.")
 
 # Boxplot
 st.subheader("📦 Boxplot by Category")
 cat_cols = df.select_dtypes(include='object').columns
-box_cat = st.selectbox("Select a categorical column", cat_cols)
-box_num = st.selectbox("Select a numeric column", numeric_cols)
+if len(cat_cols) > 0 and len(numeric_cols) > 0:
+    box_cat = st.selectbox("Select a categorical column", cat_cols)
+    box_num = st.selectbox("Select a numeric column", numeric_cols)
 
-fig4, ax4 = plt.subplots()
-sns.boxplot(data=filtered_df, x=box_cat, y=box_num, ax=ax4)
-plt.xticks(rotation=45)
-plt.title(f"{box_num} by {box_cat}")
-st.pyplot(fig4)
+    fig4, ax4 = plt.subplots()
+    sns.boxplot(data=filtered_df, x=box_cat, y=box_num, ax=ax4)
+    plt.xticks(rotation=45)
+    plt.title(f"{box_num} by {box_cat}")
+    st.pyplot(fig4)
+else:
+    st.warning("⚠️ Not enough categorical/numeric columns for boxplot.")
 
 # Footer
 st.markdown("---")
